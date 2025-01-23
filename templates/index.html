@@ -1,0 +1,227 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Simple Tax Calculator</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/3.7.0/chart.min.js"></script>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        .container {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+        }
+        .form-group {
+            margin-bottom: 15px;
+        }
+        label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: bold;
+        }
+        input {
+            width: 100%;
+            padding: 8px;
+            box-sizing: border-box;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+        }
+        button {
+            background-color: #4CAF50;
+            color: white;
+            padding: 10px 20px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        button:hover {
+            background-color: #45a049;
+        }
+        .results-container {
+            margin-top: 20px;
+            display: none;
+        }
+        .tax-summary {
+            background-color: #f8f9fa;
+            padding: 20px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+        }
+        .chart-container {
+            margin-top: 20px;
+            height: 400px;
+        }
+        .info-box {
+            background-color: #e9ecef;
+            padding: 15px;
+            border-radius: 4px;
+            margin-top: 10px;
+        }
+        .refund {
+            color: #28a745;
+        }
+        .owe {
+            color: #dc3545;
+        }
+    </style>
+</head>
+<body>
+    <h1>Simple Tax Calculator</h1>
+    
+    <div class="form-group">
+        <label for="salary">Annual Salary ($):</label>
+        <input type="number" id="salary" required min="0" step="1000">
+    </div>
+    
+    <div class="form-group">
+        <label for="fedTDS">Federal Tax Deducted at Source ($):</label>
+        <input type="number" id="fedTDS" required min="0">
+    </div>
+    
+    <div class="form-group">
+        <label for="stateTDS">State Tax Deducted at Source ($):</label>
+        <input type="number" id="stateTDS" required min="0">
+    </div>
+    
+    <button onclick="calculateTax()">Calculate Tax</button>
+    
+    <div id="results" class="results-container">
+        <div class="container">
+            <div class="tax-summary">
+                <h2>Federal Tax Summary</h2>
+                <p>Total Tax: <span id="fedTax"></span></p>
+                <p>Tax Paid: <span id="fedPaid"></span></p>
+                <p>Effective Rate: <span id="fedEffectiveRate"></span></p>
+                <div id="fedRemainingBox" class="info-box"></div>
+            </div>
+            
+            <div class="tax-summary">
+                <h2>State Tax Summary</h2>
+                <p>Total Tax: <span id="stateTax"></span></p>
+                <p>Tax Paid: <span id="statePaid"></span></p>
+                <p>Effective Rate: <span id="stateEffectiveRate"></span></p>
+                <div id="stateRemainingBox" class="info-box"></div>
+            </div>
+        </div>
+
+        <div class="chart-container">
+            <canvas id="federalChart"></canvas>
+        </div>
+        
+        <div class="chart-container">
+            <canvas id="stateChart"></canvas>
+        </div>
+    </div>
+
+    <script>
+        let federalChart = null;
+        let stateChart = null;
+
+        function createChart(ctx, data, title) {
+            return new Chart(ctx, {
+                type: 'bar',
+                data: {
+                    labels: data.map(item => item.rate),
+                    datasets: [{
+                        label: 'Tax Amount',
+                        data: data.map(item => item.tax),
+                        backgroundColor: 'rgba(54, 162, 235, 0.5)',
+                        borderColor: 'rgba(54, 162, 235, 1)',
+                        borderWidth: 1
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        title: {
+                            display: true,
+                            text: title
+                        }
+                    },
+                    scales: {
+                        y: {
+                            beginAtZero: true,
+                            ticks: {
+                                callback: function(value) {
+                                    return '$' + value.toLocaleString();
+                                }
+                            }
+                        }
+                    }
+                }
+            });
+        }
+
+        async function calculateTax() {
+            const salary = document.getElementById('salary').value;
+            const fedTDS = document.getElementById('fedTDS').value;
+            const stateTDS = document.getElementById('stateTDS').value;
+            
+            try {
+                const response = await fetch(`/api/tax_calculate?salary=${salary}&TDSf=${fedTDS}&TDSs=${stateTDS}`);
+                const data = await response.json();
+                
+                if (data.status === 'success') {
+                    // Update federal tax info
+                    document.getElementById('fedTax').textContent = formatCurrency(data.federal_tax);
+                    document.getElementById('fedPaid').textContent = formatCurrency(data.federal_tds_paid);
+                    document.getElementById('fedEffectiveRate').textContent = data.federal_effective_rate.toFixed(2) + '%';
+                    
+                    const fedRemaining = document.getElementById('fedRemainingBox');
+                    fedRemaining.textContent = data.federal_remaining > 0 ? 
+                        `You owe: ${formatCurrency(data.federal_remaining)}` : 
+                        `You will receive a refund of: ${formatCurrency(Math.abs(data.federal_remaining))}`;
+                    fedRemaining.className = 'info-box ' + (data.federal_remaining > 0 ? 'owe' : 'refund');
+
+                    // Update state tax info
+                    document.getElementById('stateTax').textContent = formatCurrency(data.state_tax);
+                    document.getElementById('statePaid').textContent = formatCurrency(data.state_tds_paid);
+                    document.getElementById('stateEffectiveRate').textContent = data.state_effective_rate.toFixed(2) + '%';
+                    
+                    const stateRemaining = document.getElementById('stateRemainingBox');
+                    stateRemaining.textContent = data.state_remaining > 0 ? 
+                        `You owe: ${formatCurrency(data.state_remaining)}` : 
+                        `You will receive a refund of: ${formatCurrency(Math.abs(data.state_remaining))}`;
+                    stateRemaining.className = 'info-box ' + (data.state_remaining > 0 ? 'owe' : 'refund');
+
+                    // Update charts
+                    if (federalChart) federalChart.destroy();
+                    if (stateChart) stateChart.destroy();
+                    
+                    federalChart = createChart(
+                        document.getElementById('federalChart').getContext('2d'),
+                        data.federal_brackets,
+                        'Federal Tax Breakdown by Bracket'
+                    );
+                    
+                    stateChart = createChart(
+                        document.getElementById('stateChart').getContext('2d'),
+                        data.state_brackets,
+                        'State Tax Breakdown by Bracket'
+                    );
+                    
+                    document.getElementById('results').style.display = 'block';
+                } else {
+                    alert('Error calculating tax: ' + data.message);
+                }
+            } catch (error) {
+                alert('Error connecting to the server: ' + error.message);
+            }
+        }
+
+        function formatCurrency(value) {
+            return new Intl.NumberFormat('en-US', {
+                style: 'currency',
+                currency: 'USD'
+            }).format(value);
+        }
+    </script>
+</body>
+</html>
